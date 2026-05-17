@@ -1,0 +1,2602 @@
+-- =========================================================================
+-- SCRIPT: ZeeHub Indonesia VD
+-- =========================================================================
+
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local Options = Library.Options
+local Toggles = Library.Toggles
+
+Library.ForceCheckbox = false
+Library.ShowToggleFrameInKeybinds = true
+
+local Window = Library:CreateWindow({
+	Title = "ZeeHub",
+	Footer = "Violence District [PREMIUM]",
+	Icon = 95816097006870,
+	NotifySide = "Right",
+	ShowCustomCursor = true,
+})
+
+---------------------------
+-- List Semua Tabs
+----------------------------
+
+local Tabs = {
+	Information = Window:AddKeyTab("Information", "info"),
+	Visuals = Window:AddTab("Visuals", "eye"),
+	Blatant = Window:AddTab("Blatant", "skull"),
+	Player = Window:AddTab("Player", "users"),
+	["UI Settings"] = Window:AddTab("UI Settings", "settings"),
+}
+
+---------------------------
+-- Tabs Information
+----------------------------
+
+Tabs.Information:AddLabel({
+	Text = "ZeeHub [Official] #5k 🎉\n© ᴢᴇᴇʜᴜʙ ɪɴᴅᴏɴᴇꜱɪᴀ\ndiscord.gg/fH7mPkJMWE",
+	DoesWrap = true,
+	Size = 16,
+})
+
+---------------------------
+-- Tab Kiri Visuals [Player]
+----------------------------
+
+local VisualsLeftGroupBox = Tabs.Visuals:AddLeftGroupbox("Player", "users-round")
+
+-- 🔥 ESP / Chams Player logic
+local espPlayersActive = false
+local espNoNameActive = false
+local espPlayersObjects = {}
+local espConnections = {}
+
+local Players = game:GetService("Players")
+local Teams = game:GetService("Teams")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- 🧹 Disconnect all ESP connections
+local function disconnectESPConnections()
+    for _, conn in ipairs(espConnections) do
+        if conn.Connected then
+            conn:Disconnect()
+        end
+    end
+    table.clear(espConnections)
+end
+
+-- 🧹 Clear all ESP visuals
+local function clearESP()
+    for _, objs in pairs(espPlayersObjects) do
+        if objs.highlight then pcall(function() objs.highlight:Destroy() end) end
+        if objs.nametag then pcall(function() objs.nametag:Destroy() end) end
+    end
+    espPlayersObjects = {}
+end
+
+-- 📌 Safe parent for ESP objects
+local function safeParent(obj)
+    local ok = pcall(function()
+        obj.Parent = CoreGui
+    end)
+    if not ok then
+        local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+        if pg then
+            obj.Parent = pg
+        else
+            obj.Parent = workspace
+        end
+    end
+end
+
+-- 🧩 Create highlight + nametag
+local function createESP(player, withName)
+    if player == LocalPlayer then return end
+    local character = player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+
+    local color
+    local killerTeam = Teams:FindFirstChild("Killer")
+    local survivorTeam = Teams:FindFirstChild("Survivors")
+
+    if killerTeam and player.Team == killerTeam then
+        color = Color3.fromRGB(255, 0, 0)
+    elseif survivorTeam and player.Team == survivorTeam then
+        color = Color3.fromRGB(0, 150, 255)
+    else
+        color = Color3.fromRGB(255, 255, 255)
+    end
+
+    if espPlayersObjects[player] then
+        if espPlayersObjects[player].highlight then pcall(function() espPlayersObjects[player].highlight:Destroy() end) end
+        if espPlayersObjects[player].nametag then pcall(function() espPlayersObjects[player].nametag:Destroy() end) end
+    end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "PlayerESPHighlight"
+    highlight.Adornee = character
+    highlight.FillColor = color
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    safeParent(highlight)
+
+    local billboard = nil
+    if withName then
+        local head = character:FindFirstChild("Head")
+        if head then
+            billboard = Instance.new("BillboardGui")
+            billboard.Name = "ESPNametag"
+            billboard.Adornee = head
+            billboard.Size = UDim2.new(0, 130, 0, 30)
+            billboard.StudsOffset = Vector3.new(0, 2, 0)
+            billboard.AlwaysOnTop = true
+            safeParent(billboard)
+
+            local textLabel = Instance.new("TextLabel")
+            textLabel.Size = UDim2.new(1, 0, 1, 0)
+            textLabel.BackgroundTransparency = 1
+            textLabel.TextColor3 = color
+            textLabel.TextStrokeTransparency = 0
+            textLabel.Font = Enum.Font.SourceSansBold
+            textLabel.TextScaled = true
+            textLabel.Text = string.format("%s (%s)", player.Name, player.Team and player.Team.Name or "Unknown")
+            textLabel.Parent = billboard
+        end
+    end
+
+    espPlayersObjects[player] = {highlight = highlight, nametag = billboard}
+end
+
+-- 🔁 Track one player (respawn & team change)
+local function setupPlayerTracking(player)
+    if player == LocalPlayer then return end
+
+    if player.Character then
+        task.delay(0.1, function()
+            if espPlayersActive or espNoNameActive then
+                createESP(player, espPlayersActive)
+            end
+        end)
+    end
+
+    table.insert(espConnections,
+        player.CharacterAdded:Connect(function()
+            task.delay(0.2, function()
+                if espPlayersActive or espNoNameActive then
+                    createESP(player, espPlayersActive)
+                end
+            end)
+        end)
+    )
+
+    table.insert(espConnections,
+        player:GetPropertyChangedSignal("Team"):Connect(function()
+            if espPlayersActive or espNoNameActive then
+                createESP(player, espPlayersActive)
+            end
+        end)
+    )
+end
+
+-- 🚀 Enable ESP (withName or noName)
+local function enableESP(withName)
+    clearESP()
+    disconnectESPConnections()
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        setupPlayerTracking(player)
+    end
+
+    table.insert(espConnections,
+        Players.PlayerAdded:Connect(function(player)
+            setupPlayerTracking(player)
+        end)
+    )
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            createESP(player, withName)
+        end
+    end
+end
+
+-- 🔹 UI Toggle integration
+VisualsLeftGroupBox:AddToggle("PlayerNametag", {
+    Text = "Player Nametag",
+    Default = false,
+    Callback = function(state)
+        espPlayersActive = state
+        espNoNameActive = false
+
+        if state then
+            enableESP(true)
+        else
+            clearESP()
+            disconnectESPConnections()
+        end
+    end,
+})
+
+VisualsLeftGroupBox:AddToggle("ChamsPlayer", {
+    Text = "Chams",
+    Default = false,
+    Callback = function(state)
+        espNoNameActive = state
+        espPlayersActive = false
+
+        if state then
+            enableESP(false)
+        else
+            clearESP()
+            disconnectESPConnections()
+        end
+    end,
+})
+
+---------------------------
+-- Tab Kiri Visuals [Generator]
+----------------------------
+
+local VisualsLeftGroupBox2 = Tabs.Visuals:AddLeftGroupbox("Generator", "zap")
+
+---------------------------
+-- Fiture ESP Generator Name
+----------------------------
+local ESP = loadstring(game:HttpGet("https://kiriot22.com/releases/ESP.lua"))()
+
+ESP.Players = false
+ESP.Boxes = false
+ESP.Names = true
+ESP:Toggle(true)
+
+VisualsLeftGroupBox2:AddToggle("Nametag", {
+	Text = "Nametag",
+	Default = false,
+	Callback = function(state)
+        if state then
+
+            -- Listener object Generator
+            ESP:AddObjectListener(workspace.Map, {
+                Name = "Generator",
+                CustomName = "Generator",
+                Color = Color3.fromRGB(255, 0, 0),
+                IsEnabled = "GeneratorESP"
+            })
+
+            -- Rooftop
+            local map = workspace:FindFirstChild("Map")
+            if map then
+                local rooftop = map:FindFirstChild("Rooftop")
+                if rooftop then
+                    local function AddGenESP(obj)
+                        if obj:IsA("BasePart") and obj.Name == "HitBox" then
+                            ESP:Add(obj, {
+                                Name = "Generator",
+                                Color = Color3.fromRGB(255, 0, 0)
+                            })
+                        end
+                    end
+                    for _, v in ipairs(rooftop:GetDescendants()) do
+                        AddGenESP(v)
+                    end
+                    rooftop.DescendantAdded:Connect(AddGenESP)
+                end
+            end
+
+            -- Gens
+            local map2 = workspace:FindFirstChild("Map")
+            if map2 then
+                local gens = map2:FindFirstChild("Gens")
+                if gens then
+                    local function AddGenESP2(obj)
+                        if obj:IsA("BasePart") and obj.Name == "HitBox" then
+                            ESP:Add(obj, {
+                                Name = "Generator",
+                                Color = Color3.fromRGB(255, 0, 0)
+                            })
+                        end
+                    end
+                    for _, v in ipairs(gens:GetDescendants()) do
+                        AddGenESP2(v)
+                    end
+                    gens.DescendantAdded:Connect(AddGenESP2)
+                end
+            end
+
+            ESP.GeneratorESP = true
+        else
+            ESP.GeneratorESP = false
+        end
+	end,
+})
+
+---------------------------
+-- Fiture Generator Chams + Percent
+----------------------------
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local GeneratorESP = {}
+
+local enabled = false
+local conns = {}
+local reg = {}          -- [Model] = { part = BasePart, lastPct = number }
+local billboards = {}   -- [Model] = BillboardGui
+local highlights = {}   -- [Model] = Highlight
+
+local TEXT_RED   = Color3.fromRGB(255, 0, 0)
+local HL_YELLOW  = Color3.fromRGB(255, 255, 0)
+local HL_GREEN   = Color3.fromRGB(0, 255, 0)
+
+local updateInterval = 0.5
+local lastUpdateTime = 0
+
+local function alive(i) return i and i.Parent ~= nil end
+local function validPart(p) return p and alive(p) and p:IsA("BasePart") end
+
+local function firstBasePart(inst)
+	if not alive(inst) then return nil end
+	if inst:IsA("BasePart") then return inst end
+	if inst:IsA("Model") then
+		if inst.PrimaryPart and validPart(inst.PrimaryPart) then return inst.PrimaryPart end
+		local p = inst:FindFirstChildWhichIsA("BasePart", true)
+		if validPart(p) then return p end
+	end
+	return nil
+end
+
+local function makeBillboard()
+	local g = Instance.new("BillboardGui")
+	g.Name = "GEN_ESP"
+	g.AlwaysOnTop = true
+	g.Size = UDim2.new(0, 220, 0, 36)
+	g.StudsOffset = Vector3.new(0, 3, 0)
+
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Size = UDim2.new(1, 0, 1, 0)
+	l.Font = Enum.Font.GothamBold
+	l.TextSize = 14
+	l.TextColor3 = TEXT_RED
+	l.TextStrokeTransparency = 0
+	l.TextStrokeColor3 = Color3.new(0, 0, 0)
+	l.Parent = g
+
+	return g
+end
+
+local function makeHighlight(adornee)
+	local hl = Instance.new("Highlight")
+	hl.Name = "GeneratorHighlight"
+	hl.Adornee = adornee
+	hl.FillColor = HL_YELLOW
+	hl.OutlineColor = HL_YELLOW
+	hl.FillTransparency = 0.4
+	hl.OutlineTransparency = 0
+	hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	return hl
+end
+
+local function getGenerators()
+	local map = Workspace:FindFirstChild("Map") or Workspace:FindFirstChild("Map1")
+	if not map then return {} end
+
+	local results = {}
+	local function recurse(folder)
+		for _, child in ipairs(folder:GetChildren()) do
+			if child:IsA("Model") and child.Name:lower():find("generator") then
+				table.insert(results, child)
+			elseif child:IsA("Folder") or child:IsA("Model") then
+				recurse(child)
+			end
+		end
+	end
+	recurse(map)
+	return results
+end
+
+local function genLabelText(model)
+	local pct = 0
+	if model.GetAttribute then
+		pct = tonumber(model:GetAttribute("RepairProgress")) or 0
+	end
+	if pct >= 0 and pct <= 1.001 then pct = pct * 100 end
+	pct = math.clamp(pct, 0, 100)
+
+	local repairers = 0
+	if model.GetAttribute then
+		repairers = tonumber(model:GetAttribute("PlayersRepairingCount")) or 0
+	end
+
+	local paused = false
+	if model.GetAttribute then
+		paused = (model:GetAttribute("ProgressPaused") == true)
+	end
+
+	local parts = {("Gen %d%%"):format(math.floor(pct + 0.5))}
+	if repairers > 0 then table.insert(parts, ("(%dp)"):format(repairers)) end
+	if paused then table.insert(parts, "⏸") end
+	return table.concat(parts, " ")
+end
+
+local function ensure(model)
+	if reg[model] then return end
+	local rep = firstBasePart(model)
+	if not validPart(rep) then return end
+
+	reg[model] = { part = rep, lastPct = -1 }
+
+	local bb = makeBillboard()
+	bb.Adornee = rep
+	bb.Parent = rep
+	billboards[model] = bb
+
+	local hl = makeHighlight(model)
+	hl.Parent = model
+	highlights[model] = hl
+end
+
+local function remove(model)
+	pcall(function()
+		local bb = billboards[model]
+		if bb and bb.Parent then bb:Destroy() end
+	end)
+	billboards[model] = nil
+
+	pcall(function()
+		local hl = highlights[model]
+		if hl and hl.Parent then hl:Destroy() end
+	end)
+	highlights[model] = nil
+
+	reg[model] = nil
+end
+
+local function refresh()
+	for m,_ in pairs(reg) do remove(m) end
+	for _, gen in ipairs(getGenerators()) do ensure(gen) end
+end
+
+local function startLoops()
+	if conns.heartbeat then return end
+
+	conns.heartbeat = RunService.Heartbeat:Connect(function(dt)
+		if not enabled then return end
+
+		pcall(function()
+			lastUpdateTime = lastUpdateTime + dt
+			if lastUpdateTime < updateInterval then return end
+			lastUpdateTime = 0
+
+			for model, entry in pairs(reg) do
+				if alive(model) and entry and validPart(entry.part) then
+					if not (billboards[model] and billboards[model].Parent) then
+						local bb = makeBillboard()
+						bb.Adornee = entry.part
+						bb.Parent = entry.part
+						billboards[model] = bb
+					end
+					if not (highlights[model] and highlights[model].Parent) then
+						local hl = makeHighlight(model)
+						hl.Parent = model
+						highlights[model] = hl
+					end
+
+					local currentPct = model:GetAttribute("RepairProgress") or 0
+					if currentPct ~= entry.lastPct then
+						entry.lastPct = currentPct
+						local bb = billboards[model]
+						local lbl = bb and bb:FindFirstChildWhichIsA("TextLabel")
+						if lbl then
+							lbl.Text = genLabelText(model)
+							lbl.TextColor3 = TEXT_RED
+						end
+
+						local hl = highlights[model]
+						if hl then
+							local color = (currentPct >= 1) and HL_GREEN or HL_YELLOW
+							hl.FillColor = color
+							hl.OutlineColor = color
+						end
+					end
+				else
+					remove(model)
+				end
+			end
+		end)
+	end)
+
+	conns.descAdded = Workspace.DescendantAdded:Connect(function(obj)
+		if not enabled then return end
+		pcall(function()
+			if obj:IsA("Model") and obj.Name:lower():find("generator") then
+				ensure(obj)
+			end
+		end)
+	end)
+
+	conns.descRemoving = Workspace.DescendantRemoving:Connect(function(obj)
+		pcall(function()
+			if obj:IsA("Model") then
+				remove(obj)
+			end
+		end)
+	end)
+end
+
+local function stopLoops()
+	for _, c in pairs(conns) do
+		if c then c:Disconnect() end
+	end
+	conns = {}
+	for m,_ in pairs(reg) do remove(m) end
+	lastUpdateTime = 0
+end
+
+function GeneratorESP:SetEnabled(state: boolean)
+	enabled = state and true or false
+	if enabled then
+		refresh()
+		startLoops()
+	else
+		stopLoops()
+	end
+end
+
+-- ==============================
+-- Toggle pindah ke VisualsLeftGroupBox2
+-- ==============================
+VisualsLeftGroupBox2:AddToggle("Chams", {
+	Text = "Chams",
+	Default = false,
+	Callback = function(state)
+		GeneratorESP:SetEnabled(state)
+	end,
+})
+
+---------------------------
+-- Tab Kanan Visuals [Pallets]
+----------------------------
+
+local VisualsRightGroupBox2 = Tabs.Visuals:AddRightGroupbox("Pallets", "boxes")
+
+---------------------------
+-- Fiture ESP Pallets
+----------------------------
+
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local neonGreen = Color3.fromRGB(50, 255, 50)
+
+local connections = {}
+local highlights = {} -- [Model] = Highlight
+local enabled = false
+
+local function lower(s)
+	return (typeof(s) == "string") and string.lower(s) or ""
+end
+
+local function addConn(c)
+	table.insert(connections, c)
+end
+
+local function clearAll()
+	for _, c in ipairs(connections) do
+		if c and c.Disconnect then
+			c:Disconnect()
+		end
+	end
+	table.clear(connections)
+
+	for inst, hl in pairs(highlights) do
+		pcall(function()
+			if hl then hl:Destroy() end
+		end)
+		highlights[inst] = nil
+	end
+end
+
+-- ==============================
+-- PALLET DETECTION
+-- ==============================
+local function isPallet(inst)
+	if not inst then return false end
+	if not inst:IsA("Model") then return false end
+
+	if lower(inst.Name) ~= "palletwrong" then
+		return false
+	end
+
+	return inst:FindFirstChild("HumanoidRootPart") ~= nil
+end
+
+-- ==============================
+-- CREATE ESP
+-- ==============================
+local function mark(inst)
+	if not enabled then return end
+	if not inst or not inst.Parent then return end
+	if highlights[inst] then return end
+	if not isPallet(inst) then return end
+
+	pcall(function()
+		local hl = Instance.new("Highlight")
+		hl.Name = "PalletESP"
+		hl.Adornee = inst
+		hl.FillColor = neonGreen
+		hl.OutlineColor = neonGreen
+		hl.FillTransparency = 0.5
+		hl.OutlineTransparency = 0
+		hl.Parent = inst
+
+		highlights[inst] = hl
+	end)
+end
+
+-- ==============================
+-- ATTACH WATCHER
+-- ==============================
+local function attach(container)
+	-- initial scan
+	pcall(function()
+		for _, d in ipairs(container:GetDescendants()) do
+			mark(d)
+		end
+	end)
+
+	-- add
+	addConn(container.DescendantAdded:Connect(function(d)
+		mark(d)
+	end))
+
+	-- remove (AUTO DESTROY ESP)
+	addConn(container.DescendantRemoving:Connect(function(d)
+		local hl = highlights[d]
+		if hl then
+			hl:Destroy()
+			highlights[d] = nil
+		end
+	end))
+end
+
+-- ==============================
+-- WATCHDOG (ANTI BUG / SAFE)
+-- ==============================
+local function startWatchdog()
+	local acc = 0
+	addConn(RunService.Heartbeat:Connect(function(dt)
+		if not enabled then return end
+		acc += dt
+		if acc < 3 then return end
+		acc = 0
+
+		for inst, hl in pairs(highlights) do
+			if not inst.Parent then
+				if hl then hl:Destroy() end
+				highlights[inst] = nil
+			end
+		end
+	end))
+end
+
+-- ==============================
+-- TOGGLE (Visuals)
+-- ==============================
+VisualsRightGroupBox2:AddToggle("PalletESP", {
+	Text = "Pallets",
+	Default = false,
+	Callback = function(state)
+		enabled = state
+		clearAll()
+
+		if not state then return end
+
+		local map = Workspace:FindFirstChild("Map")
+		if not map then return end
+
+		-- attach ke Map (ringan + aman)
+		attach(map)
+		startWatchdog()
+	end
+})
+
+---------------------------
+-- Tab Kanan Visuals [Pallets]
+----------------------------
+
+local VisualsRightGroupBox3 = Tabs.Visuals:AddRightGroupbox("Window", "grid-2x2")
+
+-- ==============================
+-- WINDOW ESP (FINAL UPDATE)
+-- Detect:
+-- 1. Map.Window.Bottom
+-- 2. Map.Vaults.Window.Bottom
+-- 3. Map.Window.inviswall
+-- 4. Map.Window.VaultTrigger
+-- ==============================
+
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local neonGreen = Color3.fromRGB(50, 255, 50)
+
+local connections = {}
+local highlights = {} -- [Model] = Highlight
+local enabled = false
+
+local function lower(s)
+	return (typeof(s) == "string") and string.lower(s) or ""
+end
+
+local function addConn(c)
+	table.insert(connections, c)
+end
+
+local function clearAll()
+	for _, c in ipairs(connections) do
+		if c and c.Disconnect then
+			c:Disconnect()
+		end
+	end
+	table.clear(connections)
+
+	for inst, hl in pairs(highlights) do
+		pcall(function()
+			if hl then hl:Destroy() end
+		end)
+		highlights[inst] = nil
+	end
+end
+
+-- ==============================
+-- WINDOW DETECTION
+-- ==============================
+local function isWindow(inst)
+	if not inst then return false end
+
+	-- Part-based detection (Bottom / inviswall / VaultTrigger)
+	if inst:IsA("BasePart") then
+		local n = lower(inst.Name)
+		if n == "bottom" or n == "inviswall" or n == "vaulttrigger" then
+			local window = inst.Parent
+			if window and lower(window.Name) == "window" then
+				return true
+			end
+		end
+	end
+
+	-- Model-based detection
+	if inst:IsA("Model") and lower(inst.Name) == "window" then
+		return inst:FindFirstChild("Bottom") ~= nil
+			or inst:FindFirstChild("inviswall") ~= nil
+			or inst:FindFirstChild("VaultTrigger") ~= nil
+	end
+
+	return false
+end
+
+-- ==============================
+-- CREATE ESP
+-- ==============================
+local function mark(inst)
+	if not enabled then return end
+	if not inst or not inst.Parent then return end
+
+	-- jika yang terdeteksi part → naik ke Model Window
+	local target = inst
+	if inst:IsA("BasePart") then
+		target = inst.Parent
+	end
+
+	if not target or highlights[target] then return end
+	if not isWindow(inst) then return end
+
+	pcall(function()
+		local hl = Instance.new("Highlight")
+		hl.Name = "WindowESP"
+		hl.Adornee = target
+		hl.FillColor = neonGreen
+		hl.OutlineColor = neonGreen
+		hl.FillTransparency = 0.5
+		hl.OutlineTransparency = 0
+		hl.Parent = target
+
+		highlights[target] = hl
+	end)
+end
+
+-- ==============================
+-- ATTACH WATCHER
+-- ==============================
+local function attach(container)
+	-- initial scan
+	pcall(function()
+		for _, d in ipairs(container:GetDescendants()) do
+			mark(d)
+		end
+	end)
+
+	-- add
+	addConn(container.DescendantAdded:Connect(function(d)
+		mark(d)
+	end))
+
+	-- remove
+	addConn(container.DescendantRemoving:Connect(function(d)
+		local hl = highlights[d]
+		if hl then
+			hl:Destroy()
+			highlights[d] = nil
+		end
+	end))
+end
+
+-- ==============================
+-- WATCHDOG (ANTI BUG)
+-- ==============================
+local function startWatchdog()
+	local acc = 0
+	addConn(RunService.Heartbeat:Connect(function(dt)
+		if not enabled then return end
+		acc += dt
+		if acc < 3 then return end
+		acc = 0
+
+		for inst, hl in pairs(highlights) do
+			if not inst.Parent then
+				if hl then hl:Destroy() end
+				highlights[inst] = nil
+			end
+		end
+	end))
+end
+
+-- ==============================
+-- TOGGLE (Visuals)
+-- ==============================
+VisualsRightGroupBox3:AddToggle("WindowESP", {
+	Text = "Windows",
+	Default = false,
+	Callback = function(state)
+		enabled = state
+		clearAll()
+
+		if not state then return end
+
+		local map = Workspace:FindFirstChild("Map")
+		if not map then return end
+
+		attach(map)
+		startWatchdog()
+	end
+})
+
+---------------------------
+-- Tab Kiri Blatant [Blatant]
+----------------------------
+
+local BlatantLeftGroupBox = Tabs.Blatant:AddLeftGroupbox("Blatant", "skull")
+
+---------------------------
+-- Fiture Anti Fail Generator
+----------------------------
+local Players = game:GetService("Players")
+
+BlatantLeftGroupBox:AddButton({
+	Text = "Anti Fail Generator/Heal",
+	Func = function()
+		for _, player in pairs(Players:GetPlayers()) do
+			local playerFolder = workspace:FindFirstChild(player.Name)
+			if playerFolder then
+				for _, objName in pairs({"Skillcheck-gen", "Skillcheck-player"}) do
+					local obj = playerFolder:FindFirstChild(objName)
+					if obj then
+						pcall(function() obj:Destroy() end) -- safe destroy
+					end
+				end
+			end
+		end
+
+		print("[AntiFailGenerator] Anti Fail Generator/Heal has been activated.")
+	end,
+	DoubleClick = false,
+	Tooltip = "Every 1 match you have to reactivate it",
+	DisabledTooltip = "I am disabled!",
+	Disabled = false,
+	Visible = true,
+	Risky = false,
+})
+
+---------------------------
+-- Fiture Bypass First Person Killer
+----------------------------
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+BlatantLeftGroupBox:AddButton({
+	Text = "Bypass First Person Killer",
+	Func = function()
+		local playerFolder = workspace:FindFirstChild(player.Name)
+		if not playerFolder then
+			print("[Bypass] Player folder not found in workspace!")
+			return
+		end
+
+		-- 1️⃣ Safely remove and restore Camera resetter
+		local cameraResetter = playerFolder:FindFirstChild("Camera resetter")
+		if cameraResetter then
+			local backup = cameraResetter:Clone()
+			cameraResetter:Destroy()
+			task.wait(0.2)
+			backup.Parent = playerFolder
+			print("[Bypass] Camera resetter successfully removed and restored.")
+		else
+			print("[Bypass] Camera resetter not found.")
+		end
+
+		-- 2️⃣ Remove Firstperson
+		local firstPerson = playerFolder:FindFirstChild("Firstperson")
+		if firstPerson then
+			pcall(function() firstPerson:Destroy() end)
+			print("[Bypass] Firstperson successfully removed.")
+		else
+			print("[Bypass] Firstperson not found.")
+		end
+
+		print("[Bypass] Bypass First Person Killer has been activated!")
+	end,
+	DoubleClick = false,
+	Tooltip = "Works only for Killer",
+	DisabledTooltip = "I am disabled!",
+	Disabled = false,
+	Visible = true,
+	Risky = false,
+})
+
+---------------------------
+-- Fiture TP to Random Generator
+----------------------------
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- Fungsi helper (pakai registry GeneratorESP)
+local function getRandomGeneratorPart()
+	local list = {}
+	for model, entry in pairs(reg) do
+		if alive(model) and entry and validPart(entry.part) then
+			table.insert(list, entry.part)
+		end
+	end
+
+	-- fallback: scan generator dari map
+	if #list == 0 then
+		for _, gen in ipairs(getGenerators()) do
+			local p = firstBasePart(gen)
+			if validPart(p) then
+				table.insert(list, p)
+			end
+		end
+	end
+
+	if #list == 0 then return nil end
+	return list[math.random(1, #list)]
+end
+
+BlatantLeftGroupBox:AddButton({
+	Text = "TP to Random Generator",
+	Func = function()
+		local part = getRandomGeneratorPart()
+		if not part then
+			print("[TP] No generator found or registered.")
+			return
+		end
+
+		local char = LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if not hrp then
+			print("[TP] HumanoidRootPart not found.")
+			return
+		end
+
+		-- Teleport sedikit di atas agar tidak stuck
+		pcall(function()
+			hrp.CFrame = part.CFrame * CFrame.new(0, 3, 0)
+		end)
+
+		print("[TP] Teleported to random generator.")
+	end,
+	DoubleClick = false,
+	Disabled = false,
+	Visible = true,
+	Risky = false,
+})
+
+---------------------------
+-- Tab Kiri Blatant [New Feature]
+----------------------------
+
+local BlatantRightGroupBox2 = Tabs.Blatant:AddRightGroupbox("New Feature", "bell-plus")
+
+-- =====================================================================
+-- SERVICES
+-- =====================================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local LP = Players.LocalPlayer
+
+-- =====================================================================
+-- AUTO WIN SETTINGS
+-- =====================================================================
+
+local autoWinEnabled = false
+
+local autoWinConn
+local charConn
+
+local lastCharacter
+local busy = false
+
+-- =====================================================================
+-- UTILITY
+-- =====================================================================
+
+local function getCharacter()
+	return LP.Character
+end
+
+local function getRoot(char)
+	if not char then return nil end
+
+	return char:FindFirstChild("HumanoidRootPart")
+		or char:FindFirstChild("Torso")
+		or char:FindFirstChild("UpperTorso")
+end
+
+local function teleportTo(pos)
+	local char = getCharacter()
+	local root = getRoot(char)
+
+	if not root then
+		return false
+	end
+
+	pcall(function()
+		root.CFrame = CFrame.new(pos)
+	end)
+
+	return true
+end
+
+-- =====================================================================
+-- FIND OBJECTS
+-- =====================================================================
+
+local function getFinishlinePosition()
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if obj.Name == "Fininshline" then
+			if obj:IsA("BasePart") then
+				return obj.Position
+			end
+
+			local part = obj:FindFirstChildWhichIsA("BasePart")
+			if part then
+				return part.Position
+			end
+		end
+	end
+
+	return nil
+end
+
+local function getCarlobbyPosition()
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if obj.Name == "carlobby" then
+			if obj:IsA("BasePart") then
+				return obj.Position
+			end
+
+			local part = obj:FindFirstChildWhichIsA("BasePart")
+			if part then
+				return part.Position
+			end
+		end
+	end
+
+	return nil
+end
+
+-- =====================================================================
+-- CLEAR LOOP
+-- =====================================================================
+
+local function clearAutoWin()
+	if autoWinConn then
+		autoWinConn:Disconnect()
+		autoWinConn = nil
+	end
+
+	lastCharacter = nil
+	busy = false
+end
+
+-- =====================================================================
+-- AUTO WIN LOOP
+-- =====================================================================
+
+local function hookAutoWin(char)
+	if not autoWinEnabled then return end
+	if not char or char == lastCharacter then return end
+
+	lastCharacter = char
+
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local root = getRoot(char)
+
+	if not hum or not root then
+		return
+	end
+
+	local function autoWinLoop()
+		if not autoWinEnabled then return end
+		if busy then return end
+
+		-- 🚫 jangan ganggu saat ragdoll / physics
+		if hum.PlatformStand then return end
+
+		local state = hum:GetState()
+
+		if state == Enum.HumanoidStateType.Physics
+		or state == Enum.HumanoidStateType.Ragdoll
+		or state == Enum.HumanoidStateType.FallingDown then
+			return
+		end
+
+		busy = true
+
+		task.spawn(function()
+			local finishPos = getFinishlinePosition()
+
+			if finishPos then
+				teleportTo(finishPos)
+
+				print("[AutoWin] Teleport Finishline")
+
+				task.wait(5)
+
+				local lobbyPos = getCarlobbyPosition()
+
+				if lobbyPos then
+					teleportTo(lobbyPos)
+
+					print("[AutoWin] Teleport Carlobby")
+				else
+					warn("[AutoWin] Carlobby not found")
+				end
+			else
+				warn("[AutoWin] Finishline not found")
+			end
+
+			task.wait(1)
+
+			busy = false
+		end)
+	end
+
+	-- jalan aman seperti WalkSpeed
+	autoWinConn = RunService.Heartbeat:Connect(autoWinLoop)
+end
+
+local function scanCharacter()
+	if not autoWinEnabled then return end
+
+	local char = getCharacter()
+
+	if char then
+		hookAutoWin(char)
+	end
+end
+
+-- =====================================================================
+-- CHARACTER ADDED
+-- =====================================================================
+
+LP.CharacterAdded:Connect(function(char)
+	clearAutoWin()
+
+	if not autoWinEnabled then
+		return
+	end
+
+	task.wait(1)
+
+	hookAutoWin(char)
+
+	task.spawn(function()
+		while char.Parent and autoWinEnabled do
+			scanCharacter()
+			task.wait(0.5)
+		end
+	end)
+end)
+
+-- =====================================================================
+-- TOGGLE
+-- =====================================================================
+
+BlatantRightGroupBox2:AddToggle("AutoWin", {
+	Text = "Auto Win",
+	Default = false,
+	Tooltip = "Teleport Finishline -> Wait -> Carlobby",
+
+	Callback = function(Value)
+		autoWinEnabled = Value
+
+		if not autoWinEnabled then
+			clearAutoWin()
+
+			print("[AutoWin] Disabled")
+			return
+		end
+
+		scanCharacter()
+
+		print("[AutoWin] Enabled")
+	end
+})
+
+-- ============================================================================
+-- ============================================================================
+-- STEALTH INVISIBILITY (UPGRADED - SEAT METHOD + PRE-TELEPORT)
+-- Fitur: Sebelum invisible, pemain dinaikkan 90 studs ke atas, lalu di-invisible,
+--        kemudian dikembalikan ke posisi semula. Metode seat tetap digunakan.
+-- ============================================================================
+
+-- Variabel state untuk sistem seat
+local currentSeat = nil
+local seatWeld = nil
+local isSeatActive = false
+local seatTeleportPosition = Vector3.new(-25.95, 400, 3537.55)  -- dari script referensi
+local voidLevelYThreshold = -50
+local seatReturnHeartbeatConnection = nil
+
+-- Fungsi untuk mulai memantau karakter agar tetap di seat (jika perlu)
+local function startSeatReturnHeartbeat()
+    if seatReturnHeartbeatConnection then
+        seatReturnHeartbeatConnection:Disconnect()
+        seatReturnHeartbeatConnection = nil
+    end
+    seatReturnHeartbeatConnection = RunService.Heartbeat:Connect(function()
+        -- Kosongkan atau isi sesuai kebutuhan (bisa untuk mempertahankan posisi)
+    end)
+end
+
+local function stopSeatReturnHeartbeat()
+    if seatReturnHeartbeatConnection then
+        seatReturnHeartbeatConnection:Disconnect()
+        seatReturnHeartbeatConnection = nil
+    end
+end
+
+-- Set transparency untuk seluruh karakter
+local function setCharacterTransparency(transparency)
+    if not localCharacter then return end
+    for _, part in ipairs(localCharacter:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            part.Transparency = transparency
+        end
+    end
+end
+
+-- ** Fungsi utama makeInvisible (menggunakan metode seat + pre-teleport) **
+local function makeInvisible()
+    if not config.stealthEnabled then return end
+    if isInvisible then return end
+    if not localCharacter then return end
+
+    -- ========== TAMBAHAN: TELEPORT KE ATAS (90 studs) ==========
+    local humanoidRootPart = localCharacter:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then
+        print("[Stealth] Cannot make invisible: No HumanoidRootPart")
+        return
+    end
+    local originalCFrame = humanoidRootPart.CFrame
+    local upPosition = originalCFrame.Position + Vector3.new(0, -90, 0)
+    pcall(function() humanoidRootPart.CFrame = CFrame.new(upPosition) end)
+    task.wait(0.05)
+    -- =========================================================
+
+    -- Bersihkan seat lama jika ada
+    if currentSeat then
+        pcall(function() currentSeat:Destroy() end)
+        currentSeat = nil
+        seatWeld = nil
+    end
+    stopSeatReturnHeartbeat()
+    isSeatActive = false
+
+    -- Simpan posisi asli untuk fallback (posisi setelah teleport ke atas)
+    local savedpos = humanoidRootPart.CFrame
+
+    -- Teleport ke posisi seat (posisi tetap dari script referensi)
+    pcall(function() localCharacter:MoveTo(seatTeleportPosition) end)
+    task.wait(0.05)
+
+    -- Cek apakah teleport gagal (masuk void)
+    if not localCharacter:FindFirstChild("HumanoidRootPart") or 
+       localCharacter.HumanoidRootPart.Position.Y < voidLevelYThreshold then
+        pcall(function() localCharacter:MoveTo(savedpos) end)
+        print("[Stealth] Teleport to seat failed (void). Aborting.")
+        -- Kembalikan ke posisi semula (setelah teleport ke atas)
+        pcall(function() humanoidRootPart.CFrame = originalCFrame end)
+        return
+    end
+
+    -- Buat seat baru
+    local Seat = Instance.new('Seat')
+    Seat.Name = 'CyberHeroes_Seat'
+    Seat.Anchored = false
+    Seat.CanCollide = false
+    Seat.Transparency = 1
+    Seat.Position = seatTeleportPosition
+    Seat.Parent = workspace
+
+    -- Weld ke torso
+    local torso = localCharacter:FindFirstChild("Torso") or localCharacter:FindFirstChild("UpperTorso")
+    if torso then
+        seatWeld = Instance.new("Weld")
+        seatWeld.Part0 = Seat
+        seatWeld.Part1 = torso
+        seatWeld.Parent = Seat
+        task.wait()
+        pcall(function() Seat.CFrame = savedpos end)
+        currentSeat = Seat
+        startSeatReturnHeartbeat()
+        isSeatActive = true
+    else
+        Seat:Destroy()
+        print("[Stealth] Cannot make invisible: No torso found")
+        -- Kembalikan ke posisi semula
+        pcall(function() humanoidRootPart.CFrame = originalCFrame end)
+        return
+    end
+
+    -- Set transparency (default 0.75 dari script referensi)
+    setCharacterTransparency(0.75)
+    isInvisible = true
+
+    -- ========== TAMBAHAN: KEMBALI KE POSISI SEMULA (setelah invisibility aktif) ==========
+    pcall(function() humanoidRootPart.CFrame = originalCFrame end)
+    print("[Stealth] Invisibility enabled (seat method) with pre-teleport up 90 studs")
+end
+
+-- ** Fungsi makeVisible (tidak berubah) **
+local function makeVisible()
+    if not isInvisible then return end
+    if not localCharacter then return end
+
+    -- Hancurkan seat dan weld
+    if currentSeat then
+        pcall(function() currentSeat:Destroy() end)
+        currentSeat = nil
+        seatWeld = nil
+    end
+    stopSeatReturnHeartbeat()
+    isSeatActive = false
+
+    -- Kembalikan transparency ke 0
+    setCharacterTransparency(0)
+
+    isInvisible = false
+    print("[Stealth] Invisibility disabled")
+end
+
+-- ** Start/Stop Stealth Monitor (tetap sama) **
+local function startStealthMonitor()
+    if stealthConnection then return end
+    if config.stealthEnabled then
+        makeInvisible()
+    end
+    stealthConnection = RunService.Heartbeat:Connect(function()
+        if config.stealthEnabled and not isInvisible then
+            makeInvisible()
+        elseif not config.stealthEnabled and isInvisible then
+            makeVisible()
+        end
+    end)
+    print("[Stealth] Stealth monitor started (seat method + pre-teleport)")
+end
+
+local function stopStealthMonitor()
+    if stealthConnection then
+        stealthConnection:Disconnect()
+        stealthConnection = nil
+    end
+    makeVisible()
+    print("[Stealth] Stealth monitor stopped")
+end
+
+-- =====================================================================
+-- TOGGLE : INVISIBLE
+-- FIXED VERSION
+-- =====================================================================
+
+BlatantRightGroupBox2:AddToggle("Invisible", {
+	Text = "Invisible",
+	Default = false,
+	Tooltip = "",
+
+	Callback = function(Value)
+		config.stealthEnabled = Value
+
+		if not config.stealthEnabled then
+			stopStealthMonitor()
+
+			print("[Invisible] Disabled")
+			return
+		end
+
+		startStealthMonitor()
+
+		print("[Invisible] Enabled")
+	end
+})
+
+-- ============================================================================
+-- FEATURE 6: GOD MODE (HEALTH REGEN + STEALTH WITH DISTANCE TRIGGER)
+-- Menggabungkan health regeneration dengan stealth (seat method) yang hanya aktif
+-- saat killer dalam jarak ≤ config.stealthTriggerDistance (default 20 studs)
+-- Stealth nonaktif saat jarak > config.stealthTriggerDistance
+-- Menggunakan salinan fungsi stealth dengan variabel internal sendiri (tidak konflik dengan fitur Stealth asli)
+-- ============================================================================
+
+-- Variabel untuk koneksi god mode (health regen + stealth trigger)
+local godModeConnection = nil
+local stealthDistanceConnection = nil
+local god_isStealthCurrentlyActive = false   -- flag internal
+
+-- Konfigurasi jarak trigger stealth (dapat diubah via config)
+if config.stealthTriggerDistance == nil then
+    config.stealthTriggerDistance = 20   -- jarak dalam studs
+end
+
+-- ============================================================================
+-- FUNGSI STEALTH INTERNAL GOD MODE (SALINAN DENGAN NAMA VARIABEL UNIK)
+-- ============================================================================
+local god_currentSeat = nil
+local god_seatWeld = nil
+local god_isSeatActive = false
+local god_seatTeleportPosition = Vector3.new(-25.95, 400, 3537.55)
+local god_voidLevelYThreshold = -50
+local god_seatReturnHeartbeatConnection = nil
+local god_isInvisible = false
+
+local function god_startSeatReturnHeartbeat()
+    if god_seatReturnHeartbeatConnection then
+        god_seatReturnHeartbeatConnection:Disconnect()
+        god_seatReturnHeartbeatConnection = nil
+    end
+    god_seatReturnHeartbeatConnection = RunService.Heartbeat:Connect(function()
+        -- kosong, bisa diisi jika diperlukan
+    end)
+end
+
+local function god_stopSeatReturnHeartbeat()
+    if god_seatReturnHeartbeatConnection then
+        god_seatReturnHeartbeatConnection:Disconnect()
+        god_seatReturnHeartbeatConnection = nil
+    end
+end
+
+local function god_setCharacterTransparency(transparency)
+    if not localCharacter then return end
+    for _, part in ipairs(localCharacter:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            part.Transparency = transparency
+        end
+    end
+end
+
+local function god_makeInvisible()
+    if not config.godModeEnabled then return end
+    if god_isInvisible then return end
+    if not localCharacter then return end
+
+    local humanoidRootPart = localCharacter:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then
+        print("[GodMode] Cannot make invisible: No HumanoidRootPart")
+        return
+    end
+    local originalCFrame = humanoidRootPart.CFrame
+    local upPosition = originalCFrame.Position + Vector3.new(0, -90, 0)
+    pcall(function() humanoidRootPart.CFrame = CFrame.new(upPosition) end)
+    task.wait(0.05)
+
+    if god_currentSeat then
+        pcall(function() god_currentSeat:Destroy() end)
+        god_currentSeat = nil
+        god_seatWeld = nil
+    end
+    god_stopSeatReturnHeartbeat()
+    god_isSeatActive = false
+
+    local savedpos = humanoidRootPart.CFrame
+    pcall(function() localCharacter:MoveTo(god_seatTeleportPosition) end)
+    task.wait(0.05)
+
+    if not localCharacter:FindFirstChild("HumanoidRootPart") or 
+       localCharacter.HumanoidRootPart.Position.Y < god_voidLevelYThreshold then
+        pcall(function() localCharacter:MoveTo(savedpos) end)
+        print("[GodMode] Teleport to seat failed (void). Aborting.")
+        pcall(function() humanoidRootPart.CFrame = originalCFrame end)
+        return
+    end
+
+    local Seat = Instance.new('Seat')
+    Seat.Name = 'CyberHeroes_GodSeat'
+    Seat.Anchored = false
+    Seat.CanCollide = false
+    Seat.Transparency = 1
+    Seat.Position = god_seatTeleportPosition
+    Seat.Parent = workspace
+
+    local torso = localCharacter:FindFirstChild("Torso") or localCharacter:FindFirstChild("UpperTorso")
+    if torso then
+        god_seatWeld = Instance.new("Weld")
+        god_seatWeld.Part0 = Seat
+        god_seatWeld.Part1 = torso
+        god_seatWeld.Parent = Seat
+        task.wait()
+        pcall(function() Seat.CFrame = savedpos end)
+        god_currentSeat = Seat
+        god_startSeatReturnHeartbeat()
+        god_isSeatActive = true
+    else
+        Seat:Destroy()
+        print("[GodMode] Cannot make invisible: No torso found")
+        pcall(function() humanoidRootPart.CFrame = originalCFrame end)
+        return
+    end
+
+    god_setCharacterTransparency(0.75)
+    god_isInvisible = true
+    pcall(function() humanoidRootPart.CFrame = originalCFrame end)
+    print("[GodMode] Stealth activated (distance ≤ " .. config.stealthTriggerDistance .. " studs)")
+end
+
+local function god_makeVisible()
+    if not god_isInvisible then return end
+    if not localCharacter then return end
+
+    if god_currentSeat then
+        pcall(function() god_currentSeat:Destroy() end)
+        god_currentSeat = nil
+        god_seatWeld = nil
+    end
+    god_stopSeatReturnHeartbeat()
+    god_isSeatActive = false
+
+    god_setCharacterTransparency(0)
+    god_isInvisible = false
+    print("[GodMode] Stealth deactivated (distance > " .. config.stealthTriggerDistance .. " studs)")
+end
+
+-- ============================================================================
+-- FUNGSI UNTUK MENGECEK JARAK KILLER DAN MENGGUNAKAN STEALTH
+-- ============================================================================
+local function god_checkKillerDistanceAndToggleStealth()
+    if not config.godModeEnabled then return end
+    if not getLocalCharacter() or not localRootPart then return end
+
+    local localPos = localRootPart.Position
+    local nearestKillerDistance = math.huge
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            local char = player.Character
+            if char then
+                local isKiller = false
+                if player.Team then
+                    local teamName = player.Team.Name:lower()
+                    if teamName:find("killer") or teamName:find("monster") or teamName:find("enemy") then
+                        isKiller = true
+                    end
+                end
+                if not isKiller then
+                    local tool = char:FindFirstChildWhichIsA("Tool")
+                    if tool and (tool.Name:lower():find("knife") or tool.Name:lower():find("weapon")) then
+                        isKiller = true
+                    end
+                end
+                if isKiller then
+                    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+                    if root then
+                        local dist = (localPos - root.Position).Magnitude
+                        if dist < nearestKillerDistance then
+                            nearestKillerDistance = dist
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Stealth aktif jika jarak killer ≤ threshold, nonaktif jika > threshold
+    if nearestKillerDistance <= config.stealthTriggerDistance then
+        if not god_isInvisible then
+            god_makeInvisible()
+        end
+    else
+        if god_isInvisible then
+            god_makeVisible()   -- <- otomatis mati saat jarak > threshold
+        end
+    end
+end
+
+-- ============================================================================
+-- START / STOP GOD MODE
+-- ============================================================================
+local function startGodMode()
+    if godModeConnection then return end
+
+    -- Health regen
+    godModeConnection = RunService.Heartbeat:Connect(function()
+        if not config.godModeEnabled then return end
+        if not getLocalCharacter() or not localHumanoid then return end
+        local maxHealth = localHumanoid.MaxHealth
+        if localHumanoid.Health < maxHealth then
+            localHumanoid.Health = maxHealth
+        end
+    end)
+
+    -- Stealth trigger berdasarkan jarak killer
+    if stealthDistanceConnection then stealthDistanceConnection:Disconnect() end
+    stealthDistanceConnection = RunService.Heartbeat:Connect(god_checkKillerDistanceAndToggleStealth)
+
+    print("[GodMode] Activated: Health regen + Stealth (auto on/off when killer ≤ " .. config.stealthTriggerDistance .. " studs)")
+end
+
+local function stopGodMode()
+    if godModeConnection then
+        godModeConnection:Disconnect()
+        godModeConnection = nil
+    end
+    if stealthDistanceConnection then
+        stealthDistanceConnection:Disconnect()
+        stealthDistanceConnection = nil
+    end
+    if god_isInvisible then
+        god_makeVisible()   -- pastikan stealth dimatikan saat god mode berhenti
+    end
+    print("[GodMode] Deactivated: Health regen and stealth stopped")
+end
+
+-- ============================================================================
+-- PENJELASAN:
+-- - Stealth akan mati secara otomatis ketika jarak killer > config.stealthTriggerDistance
+--   karena fungsi `god_checkKillerDistanceAndToggleStealth` memanggil `god_makeVisible()`.
+-- - Tidak ada perubahan pada mekanisme seat dan pre-teleport.
+-- - Semua variabel internal menggunakan prefix "god_" untuk menghindari konflik.
+-- ============================================================================
+
+-- =====================================================================
+-- TOGGLE
+-- =====================================================================
+
+BlatantRightGroupBox2:AddToggle("GodMode", {
+	Text = "God Mode",
+	Default = false,
+	Tooltip = "",
+
+	Callback = function(Value)
+		autoWinEnabled = Value
+
+		if not autoWinEnabled then
+			clearAutoWin()
+
+			print("[God Mode] Disabled")
+			return
+		end
+
+		scanCharacter()
+
+		print("[God Mode] Enabled")
+	end
+})
+
+-- ============================================================================
+-- FEATURE 7: AUTO PARRY / AUTO BLOCK (OPTIMIZED - RELIABLE, 2x PER SECOND)
+-- Berdasarkan scanning workspace: item "Swort" (juga "Parrying Dagger", "Parry Dagger")
+-- Mekanisme: Ketika killer dalam jarak ≤ 10 studs, script melakukan parry maksimal 2x per detik
+-- menggunakan aktivasi tool + remote event + simulasi klik kanan.
+-- ============================================================================
+
+-- Simulasi klik kanan (biasanya digunakan untuk parry / block)
+local function simulateRightClick()
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(1, 1, true, game, 1) -- Right button down
+        task.wait(0.02)
+        VirtualInputManager:SendMouseButtonEvent(1, 1, false, game, 1) -- Right button up
+    end)
+    pcall(function()
+        VirtualUser:Button2Down(Vector2.new(500, 500))
+        task.wait(0.02)
+        VirtualUser:Button2Up(Vector2.new(500, 500))
+    end)
+end
+
+-- Simulasi tekan tombol F (alternatif untuk parry / ability)
+local function simulatePressF()
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game)
+    end)
+end
+
+-- Cari remote event untuk parry/block dengan keyword lebih lengkap
+local function findParryRemoteEvent()
+    local parryKeywords = {"parry", "block", "deflect", "counter", "riposte", "reflect", "dodge", "parrying", "use", "activate", "ability", "skill","Parry Dagger", "Parryng Dagger","Dagger"}
+    local candidates = {}
+    for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+        if remote:IsA("RemoteEvent") then
+            local name = remote.Name:lower()
+            for _, kw in ipairs(parryKeywords) do
+                if name:find(kw) then
+                    table.insert(candidates, remote)
+                end
+            end
+        end
+    end
+    -- Prioritaskan yang berhubungan dengan weapon/sword/dagger
+    for _, remote in ipairs(candidates) do
+        local rname = remote.Name:lower()
+        if rname:find("sword") or rname:find("weapon") or rname:find("dagger") or rname:find("blade") or rname:find("swort") then
+            return remote
+        end
+    end
+    return candidates[1]
+end
+
+-- Dapatkan jarak ke killer terdekat (dengan threshold 10 studs)
+local function getKillerDistance()
+    if not localRootPart then return math.huge end
+    local localPos = localRootPart.Position
+    local minDist = math.huge
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            local char = player.Character
+            if char then
+                local isKiller = false
+                if player.Team then
+                    local teamName = player.Team.Name:lower()
+                    if teamName:find("killer") or teamName:find("monster") or teamName:find("enemy") then
+                        isKiller = true
+                    end
+                end
+                if not isKiller then
+                    local tool = char:FindFirstChildWhichIsA("Tool")
+                    if tool and (tool.Name:lower():find("knife") or tool.Name:lower():find("weapon")) then
+                        isKiller = true
+                    end
+                end
+                if isKiller then
+                    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+                    if root then
+                        local dist = (localPos - root.Position).Magnitude
+                        if dist < minDist then minDist = dist end
+                    end
+                end
+            end
+        end
+    end
+    return minDist
+end
+
+-- ** Mendapatkan item Parry yang tersedia (prioritas: Swort, Parrying Dagger, Parry Dagger, Blade) **
+local function getParryItem()
+    local character = localPlayer.Character
+    local backpack = localPlayer:FindFirstChild("Backpack")
+    -- Urutan prioritas berdasarkan hasil scanning workspace
+    local itemNames = {"Swort", "Parrying Dagger", "Parry Dagger", "Blade"}
+    -- Cari di karakter dulu
+    if character then
+        for _, item in ipairs(character:GetChildren()) do
+            if item:IsA("Tool") then
+                for _, name in ipairs(itemNames) do
+                    if item.Name == name then
+                        return item
+                    end
+                end
+            end
+        end
+    end
+    -- Cari di backpack
+    if backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
+            if item:IsA("Tool") then
+                for _, name in ipairs(itemNames) do
+                    if item.Name == name then
+                        return item
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- ** Fungsi utama parry (menggunakan item + remote event + klik kanan) **
+local function performParry()
+    -- Metode 1: Gunakan item parry jika ada (Swort, Parrying Dagger, dll)
+    local parryItem = getParryItem()
+    if parryItem then
+        -- Aktifkan tool (simulasi equipping dan penggunaan)
+        pcall(function() parryItem:Activate() end)
+        -- Kirim remote event terkait item (berbagai format argumen untuk memastikan)
+        local remote = findParryRemoteEvent()
+        if remote then
+            -- Coba dengan berbagai argumen
+            pcall(function() remote:FireServer(parryItem) end)
+            pcall(function() remote:FireServer("parry", parryItem) end)
+            pcall(function() remote:FireServer("use", parryItem) end)
+            pcall(function() remote:FireServer(parryItem.Name) end)
+            pcall(function() remote:FireServer("ability", parryItem.Name) end)
+        end
+        -- Simulasi klik kanan
+        simulateRightClick()
+        -- Simulasi tekan F (untuk skill/ability)
+        simulatePressF()
+        return
+    end
+
+    -- Metode 2: Remote event parry (fallback)
+    local parryRemote = findParryRemoteEvent()
+    if parryRemote then
+        pcall(function() parryRemote:FireServer() end)
+        pcall(function() parryRemote:FireServer("parry") end)
+        pcall(function() parryRemote:FireServer("block") end)
+        pcall(function() parryRemote:FireServer("ability") end)
+    end
+
+    -- Metode 3: Simulasi klik kanan
+    simulateRightClick()
+
+    -- Metode 4: Simulasi tekan F
+    simulatePressF()
+end
+
+-- ** Timer untuk mengurangi spam: parry dieksekusi maksimal 2x per detik (interval 0.5 detik) **
+local lastParryTime = 0
+local PARRY_INTERVAL = 0.5  -- interval minimal antara parry (2x per detik, tidak spam)
+
+-- Loop auto parry (menggantikan infinite ammo)
+local infiniteAmmoConnection = nil
+
+local function startInfiniteAmmo()
+    if infiniteAmmoConnection then return end
+    infiniteAmmoConnection = RunService.Heartbeat:Connect(function()
+        if not config.infiniteAmmoEnabled then return end
+        if not getLocalCharacter() or not localRootPart then return end
+        
+        local killerDist = getKillerDistance()
+        if killerDist <= 10 then  -- jarak trigger diubah menjadi 10 studs
+            local now = tick()
+            if now - lastParryTime >= PARRY_INTERVAL then
+                lastParryTime = now
+                performParry()
+            end
+        else
+            -- Reset timer saat killer menjauh agar bisa langsung parry lagi saat kembali mendekat
+            lastParryTime = 0
+        end
+    end)
+    print("[AutoParry] Auto parry started (interval 0.5s, trigger 10 studs) - uses Swort/Parrying Dagger when available")
+end
+
+local function stopInfiniteAmmo()
+    if infiniteAmmoConnection then
+        infiniteAmmoConnection:Disconnect()
+        infiniteAmmoConnection = nil
+    end
+    print("[AutoParry] Auto parry stopped")
+end
+
+-- ============================================================================
+-- CATATAN PERBAIKAN:
+-- - Jarak trigger diubah menjadi 10 studs.
+-- - Interval parry 0.5 detik (2x per detik, tidak spam).
+-- - Prioritas item: "Swort" (berdasarkan hasil scan), lalu "Parrying Dagger", "Parry Dagger", "Blade".
+-- - Pengiriman remote event diperluas dengan berbagai kemungkinan argumen untuk memastikan server menerima.
+-- - Reset timer saat killer menjauh agar responsif saat kembali.
+-- - Tetap menggunakan nama fungsi startInfiniteAmmo/stopInfiniteAmmo untuk kompatibilitas dengan script utama.
+-- ============================================================================
+
+-- =====================================================================
+-- TOGGLE
+-- =====================================================================
+
+BlatantRightGroupBox2:AddToggle("AutoParry", {
+	Text = "Auto Parry",
+	Default = false,
+	Tooltip = "",
+
+	Callback = function(Value)
+		autoWinEnabled = Value
+
+		if not autoWinEnabled then
+			clearAutoWin()
+
+			print("[Auto Parry] Disabled")
+			return
+		end
+
+		scanCharacter()
+
+		print("[Auto Parry] Enabled")
+	end
+})
+
+-- ============================================================================
+-- FEATURE 9: AUTO SHIELD (ForceField Protection - ALWAYS ACTIVE WHEN ENABLED)
+-- Tidak menggunakan trigger jarak killer. Shield aktif terus saat fitur dinyalakan.
+-- ============================================================================
+local function addForceField()
+    if currentForceField then return end
+    if not localCharacter then return end
+    currentForceField = Instance.new("ForceField")
+    currentForceField.Name = "CyberHeroes_Shield"
+    currentForceField.Parent = localCharacter
+    isShieldActive = true
+end
+
+local function removeForceField()
+    if currentForceField then currentForceField:Destroy(); currentForceField = nil end
+    isShieldActive = false
+end
+
+-- Fungsi ini sekarang hanya mengaktifkan/menonaktifkan shield berdasarkan config (tanpa cek jarak).
+local function checkShieldProximity()
+    if not config.shieldEnabled then
+        if isShieldActive then removeForceField() end
+        return
+    end
+    if not isShieldActive then addForceField() end
+end
+
+local function startShieldMonitor()
+    if shieldConnection then return end
+    shieldConnection = RunService.Heartbeat:Connect(checkShieldProximity)
+end
+
+local function stopShieldMonitor()
+    if shieldConnection then shieldConnection:Disconnect(); shieldConnection = nil end
+    removeForceField()
+end
+
+-- =====================================================================
+-- TOGGLE
+-- =====================================================================
+
+BlatantRightGroupBox2:AddToggle("Shield", {
+	Text = "Shield",
+	Default = false,
+	Tooltip = "",
+
+	Callback = function(Value)
+		autoWinEnabled = Value
+
+		if not autoWinEnabled then
+			clearAutoWin()
+
+			print("[Shield] Disabled")
+			return
+		end
+
+		scanCharacter()
+
+		print("[Shield] Enabled")
+	end
+})
+
+---------------------------
+-- Tab Kiri Player [Movement]
+----------------------------
+
+local PlayerLeftGroupBox = Tabs.Player:AddLeftGroupbox("Movement", "scooter")
+
+-- ==============================
+-- WalkSpeed Slider (UI)
+-- ==============================
+local Players = game:GetService("Players")
+local LP = Players.LocalPlayer
+
+local BASE_SPEED = 16
+local MAX_SPEED = 100
+
+local currentSpeed = BASE_SPEED
+local enabled = false
+
+local wsConn
+local humConn
+local stateConn
+local lastHumanoid
+
+local function clearLoop()
+	if wsConn then wsConn:Disconnect(); wsConn = nil end
+	if humConn then humConn:Disconnect(); humConn = nil end
+	if stateConn then stateConn:Disconnect(); stateConn = nil end
+	lastHumanoid = nil
+end
+
+local function hookHumanoid(hum)
+	if not enabled then return end
+	if not hum or hum == lastHumanoid then return end
+
+	clearLoop()
+	lastHumanoid = hum
+
+	local function forceWS()
+		if not enabled then return end
+		if not hum.Parent then return end
+
+		-- 🚫 ANTI FREEZE: jangan ganggu stun / pallet / physics
+		if hum.WalkSpeed == 0 then return end
+		if hum.PlatformStand then return end
+
+		local state = hum:GetState()
+		if state == Enum.HumanoidStateType.Physics
+		or state == Enum.HumanoidStateType.Ragdoll
+		or state == Enum.HumanoidStateType.FallingDown then
+			return
+		end
+
+		local target = math.clamp(currentSpeed, BASE_SPEED + 1, MAX_SPEED)
+
+		-- ⚠️ hanya set jika beda (anti spam)
+		if hum.WalkSpeed ~= target then
+			hum.WalkSpeed = target
+		end
+	end
+
+	-- set sekali
+	forceWS()
+
+	-- 🔥 IY CORE (SAFE)
+	wsConn = hum:GetPropertyChangedSignal("WalkSpeed"):Connect(forceWS)
+
+	-- humanoid dihapus / diganti
+	humConn = hum.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			clearLoop()
+		end
+	end)
+
+	-- kalau masuk state stun → stop loop sementara
+	stateConn = hum.StateChanged:Connect(function(_, new)
+		if new == Enum.HumanoidStateType.Physics
+		or new == Enum.HumanoidStateType.Ragdoll then
+			clearLoop()
+		end
+	end)
+end
+
+local function scanHumanoid()
+	if not enabled then return end
+
+	local char = LP.Character
+	if not char then return end
+
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hookHumanoid(hum)
+	end
+end
+
+LP.CharacterAdded:Connect(function(char)
+	clearLoop()
+	if not enabled then return end
+
+	local hum = char:WaitForChild("Humanoid", 5)
+	if hum then
+		hookHumanoid(hum)
+	end
+
+	-- rescan kalau game ganti humanoid tanpa respawn
+	task.spawn(function()
+		while char.Parent and enabled do
+			scanHumanoid()
+			task.wait(0.25)
+		end
+	end)
+end)
+
+-- kalau sudah spawn
+if LP.Character and enabled then
+	scanHumanoid()
+end
+
+PlayerLeftGroupBox:AddSlider("WalkSpeed", {
+	Text = "WalkSpeed",
+	Default = BASE_SPEED,
+	Min = BASE_SPEED,
+	Max = MAX_SPEED,
+	Rounding = 1,
+	Compact = false,
+	Tooltip = "Use it wisely!",
+	DisabledTooltip = "I am disabled!",
+	Disabled = false,
+	Visible = true,
+	Callback = function(Value)
+		currentSpeed = Value
+		enabled = Value > BASE_SPEED
+
+		if not enabled then
+			clearLoop()
+			return
+		end
+
+		scanHumanoid()
+
+		print("[WalkSpeed] WalkSpeed set to:", Value)
+	end,
+})
+
+-- ==============================
+-- Fly Toggle (UI baru)
+-- ==============================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Config
+local FlyEnabled = false
+local FlySpeed = 60
+local VerticalSpeed = 45
+
+-- Internal
+local bv, bg, rsConn
+local keys = {Up=false, Down=false}
+local controlModule
+local inputDebounce = false -- debounce untuk input
+
+local function getChar()
+	return LocalPlayer.Character
+end
+
+local function getHumanoid()
+	local char = getChar()
+	return char and char:FindFirstChildWhichIsA("Humanoid")
+end
+
+local function getRoot()
+	local char = getChar()
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function ensureControlModule()
+	if controlModule then return end
+	local ps = LocalPlayer:WaitForChild("PlayerScripts")
+	local pm = ps:WaitForChild("PlayerModule")
+	controlModule = require(pm:WaitForChild("ControlModule"))
+end
+
+local function cleanup()
+	if rsConn then rsConn:Disconnect(); rsConn = nil end
+	pcall(function() if bv then bv:Destroy(); bv = nil end end) -- safe destroy
+	pcall(function() if bg then bg:Destroy(); bg = nil end end)
+
+	local hum = getHumanoid()
+	if hum then hum.PlatformStand = false end
+end
+
+local function startFly()
+	cleanup()
+
+	local root = getRoot()
+	local hum = getHumanoid()
+	if not root or not hum then return end
+
+	ensureControlModule()
+	hum.PlatformStand = true
+
+	bv = Instance.new("BodyVelocity")
+	bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+	bv.Velocity = Vector3.zero
+	bv.Parent = root
+
+	bg = Instance.new("BodyGyro")
+	bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+	bg.P = 9e4
+	bg.CFrame = root.CFrame
+	bg.Parent = root
+
+	rsConn = RunService.RenderStepped:Connect(function()
+		pcall(function() -- Error handling untuk mencegah crash
+			local root2 = getRoot()
+			local hum2 = getHumanoid()
+			if not root2 or not hum2 or not bv or not bg then
+				return
+			end
+
+			-- Move vector from Roblox ControlModule (works for keyboard + mobile thumbstick)
+			local move = controlModule and controlModule:GetMoveVector() or Vector3.zero
+
+			-- Skip update jika tidak ada input (optimasi performa)
+			if move.Magnitude == 0 and not keys.Up and not keys.Down then
+				bv.Velocity = Vector3.zero
+				return
+			end
+
+			-- Camera-relative planar vectors
+			local cf = Camera.CFrame
+			local forward = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
+			local right = Vector3.new(cf.RightVector.X, 0, cf.RightVector.Z)
+
+			local planar = Vector3.zero
+			if forward.Magnitude > 0 then planar += forward.Unit * (-move.Z) end
+			if right.Magnitude > 0 then planar += right.Unit * (move.X) end
+
+			if planar.Magnitude > 1 then planar = planar.Unit end
+			planar *= FlySpeed
+
+			local vy = 0
+			if keys.Up then vy += VerticalSpeed end
+			if keys.Down then vy -= VerticalSpeed end
+
+			bv.Velocity = Vector3.new(planar.X, vy, planar.Z)
+			bg.CFrame = CFrame.lookAt(root2.Position, root2.Position + cf.LookVector)
+		end)
+	end)
+end
+
+local function setFly(state)
+	FlyEnabled = state
+	if FlyEnabled then
+		startFly()
+	else
+		cleanup()
+	end
+end
+
+-- Vertical input (Space/Ctrl) dengan debounce
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp or inputDebounce then return end
+	if input.KeyCode == Enum.KeyCode.Space then
+		inputDebounce = true
+		task.delay(0.05, function() inputDebounce = false end)
+		keys.Up = true
+	end
+	if input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
+		inputDebounce = true
+		task.delay(0.05, function() inputDebounce = false end)
+		keys.Down = true
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.Space then keys.Up = false end
+	if input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then keys.Down = false end
+end)
+
+PlayerLeftGroupBox:AddToggle("Fly", {
+	Text = "Fly",
+	Default = false,
+	Disabled = false,
+	Visible = true,
+	Risky = false,
+	Callback = function(state)
+		setFly(state)
+		print("[Fly] " .. (state and "activated" or "deactivated"))
+	end,
+})
+
+---------------------------
+-- Tab Kanan Player [Misc]
+----------------------------
+
+local PlayerRightGroupBox = Tabs.Player:AddRightGroupbox("Misc", "bone")
+
+local noclipActive = false
+
+PlayerRightGroupBox:AddToggle("No Clip", {
+	Text = "No Clip",
+	Default = false,
+	Disabled = false,
+	Visible = true,
+	Risky = false,
+	Callback = function(state)
+		noclipActive = state
+		print("[NoClip] " .. (state and "activated" or "deactivated"))
+	end,
+})
+
+-- Noclip Loop
+game:GetService("RunService").Stepped:Connect(function()
+	if noclipActive then
+		local char = Players.LocalPlayer.Character
+		if char then
+			for _, part in pairs(char:GetChildren()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = false
+				end
+			end
+		end
+	end
+end)
+
+-- =========================
+-- NO FOG
+-- =========================
+local Lighting = game:GetService("Lighting")
+
+local noFogActive = false
+local removedAtmospheres = {}
+
+local fogConnStart, fogConnEnd, fogConnColor, descAddedConn
+local originalFog = {
+	FogStart = Lighting.FogStart,
+	FogEnd = Lighting.FogEnd,
+	FogColor = Lighting.FogColor,
+}
+
+local lastFogUpdate = 0
+local fogThrottle = 0.2 -- update maksimal setiap 0.2 detik
+
+local function applyNoFog()
+	Lighting.FogStart = 0
+	Lighting.FogEnd = 100000
+	Lighting.FogColor = Color3.fromRGB(255, 255, 255)
+
+	for _, v in ipairs(Lighting:GetDescendants()) do
+		if v:IsA("Atmosphere") then
+			table.insert(removedAtmospheres, v:Clone())
+			pcall(function() v:Destroy() end)
+		end
+	end
+end
+
+local function startAutoNoFog()
+	originalFog.FogStart = Lighting.FogStart
+	originalFog.FogEnd = Lighting.FogEnd
+	originalFog.FogColor = Lighting.FogColor
+
+	removedAtmospheres = {}
+	applyNoFog()
+
+	descAddedConn = Lighting.DescendantAdded:Connect(function(inst)
+		if not noFogActive then return end
+		pcall(function()
+			if inst:IsA("Atmosphere") then
+				table.insert(removedAtmospheres, inst:Clone())
+				inst:Destroy()
+			end
+		end)
+	end)
+
+	fogConnStart = Lighting:GetPropertyChangedSignal("FogStart"):Connect(function()
+		if not noFogActive then return end
+		local now = tick()
+		if now - lastFogUpdate < fogThrottle then return end
+		lastFogUpdate = now
+		pcall(function()
+			if Lighting.FogStart ~= 0 then Lighting.FogStart = 0 end
+		end)
+	end)
+
+	fogConnEnd = Lighting:GetPropertyChangedSignal("FogEnd"):Connect(function()
+		if not noFogActive then return end
+		local now = tick()
+		if now - lastFogUpdate < fogThrottle then return end
+		lastFogUpdate = now
+		pcall(function()
+			if Lighting.FogEnd ~= 100000 then Lighting.FogEnd = 100000 end
+		end)
+	end)
+
+	fogConnColor = Lighting:GetPropertyChangedSignal("FogColor"):Connect(function()
+		if not noFogActive then return end
+		local now = tick()
+		if now - lastFogUpdate < fogThrottle then return end
+		lastFogUpdate = now
+		pcall(function()
+			if Lighting.FogColor ~= Color3.fromRGB(255,255,255) then
+				Lighting.FogColor = Color3.fromRGB(255,255,255)
+			end
+		end)
+	end)
+end
+
+local function stopAutoNoFog()
+	if descAddedConn then descAddedConn:Disconnect(); descAddedConn = nil end
+	if fogConnStart then fogConnStart:Disconnect(); fogConnStart = nil end
+	if fogConnEnd then fogConnEnd:Disconnect(); fogConnEnd = nil end
+	if fogConnColor then fogConnColor:Disconnect(); fogConnColor = nil end
+
+	for _, clone in ipairs(removedAtmospheres) do
+		pcall(function() clone.Parent = Lighting end)
+	end
+	removedAtmospheres = {}
+
+	Lighting.FogStart = originalFog.FogStart
+	Lighting.FogEnd = originalFog.FogEnd
+	Lighting.FogColor = originalFog.FogColor
+	lastFogUpdate = 0
+end
+
+-- No Fog Toggle
+PlayerRightGroupBox:AddToggle("No Fog", {
+	Text = "No Fog",
+	Default = false,
+	Disabled = false,
+	Visible = true,
+	Risky = false,
+	Callback = function(state)
+		noFogActive = state
+		if noFogActive then
+			startAutoNoFog()
+		else
+			stopAutoNoFog()
+		end
+		print("[NoFog] " .. (state and "activated" or "deactivated"))
+	end,
+})
+
+-- FullBright toggle logic
+if not _G.FullBrightExecuted then
+    _G.FullBrightEnabled = false -- default off
+
+    -- Store normal lighting settings
+    _G.NormalLightingSettings = {
+        Brightness = game:GetService("Lighting").Brightness,
+        ClockTime = game:GetService("Lighting").ClockTime,
+        FogEnd = game:GetService("Lighting").FogEnd,
+        GlobalShadows = game:GetService("Lighting").GlobalShadows,
+        Ambient = game:GetService("Lighting").Ambient
+    }
+
+    local Lighting = game:GetService("Lighting")
+
+    -- Function to enable FullBright
+    local function EnableFullBright()
+        Lighting.Brightness = 1
+        Lighting.ClockTime = 12
+        Lighting.FogEnd = 786543
+        Lighting.GlobalShadows = false
+        Lighting.Ambient = Color3.fromRGB(178, 178, 178)
+    end
+
+    -- Function to disable FullBright (restore defaults)
+    local function DisableFullBright()
+        Lighting.Brightness = _G.NormalLightingSettings.Brightness
+        Lighting.ClockTime = _G.NormalLightingSettings.ClockTime
+        Lighting.FogEnd = _G.NormalLightingSettings.FogEnd
+        Lighting.GlobalShadows = _G.NormalLightingSettings.GlobalShadows
+        Lighting.Ambient = _G.NormalLightingSettings.Ambient
+    end
+
+    -- Monitor changes to re-apply FullBright
+    Lighting:GetPropertyChangedSignal("Brightness"):Connect(function()
+        if _G.FullBrightEnabled then EnableFullBright() end
+    end)
+    Lighting:GetPropertyChangedSignal("ClockTime"):Connect(function()
+        if _G.FullBrightEnabled then EnableFullBright() end
+    end)
+    Lighting:GetPropertyChangedSignal("FogEnd"):Connect(function()
+        if _G.FullBrightEnabled then EnableFullBright() end
+    end)
+    Lighting:GetPropertyChangedSignal("GlobalShadows"):Connect(function()
+        if _G.FullBrightEnabled then EnableFullBright() end
+    end)
+    Lighting:GetPropertyChangedSignal("Ambient"):Connect(function()
+        if _G.FullBrightEnabled then EnableFullBright() end
+    end)
+
+    _G.FullBrightExecuted = true
+end
+
+-- UI Toggle callback
+PlayerRightGroupBox:AddToggle("FullBright", {
+    Text = "FullBright",
+    Default = false,
+    Callback = function(state)
+        _G.FullBrightEnabled = state
+        if state then
+            -- Turn on FullBright
+            local Lighting = game:GetService("Lighting")
+            Lighting.FogEnd = 786543
+            Lighting.GlobalShadows = false
+            Lighting.Brightness = 1
+            Lighting.ClockTime = 12
+            Lighting.Ambient = Color3.fromRGB(178,178,178)
+        else
+            -- Restore normal settings
+            local Lighting = game:GetService("Lighting")
+            Lighting.Brightness = _G.NormalLightingSettings.Brightness
+            Lighting.ClockTime = _G.NormalLightingSettings.ClockTime
+            Lighting.FogEnd = _G.NormalLightingSettings.FogEnd
+            Lighting.GlobalShadows = _G.NormalLightingSettings.GlobalShadows
+            Lighting.Ambient = _G.NormalLightingSettings.Ambient
+        end
+    end
+})
+
+-- UI Settings
+local MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Menu", "wrench")
+
+MenuGroup:AddToggle("KeybindMenuOpen", {
+	Default = Library.KeybindFrame.Visible,
+	Text = "Open Keybind Menu",
+	Callback = function(value)
+		Library.KeybindFrame.Visible = value
+	end,
+})
+MenuGroup:AddToggle("ShowCustomCursor", {
+	Text = "Custom Cursor",
+	Default = true,
+	Callback = function(Value)
+		Library.ShowCustomCursor = Value
+	end,
+})
+MenuGroup:AddDropdown("NotificationSide", {
+	Values = { "Left", "Right" },
+	Default = "Right",
+
+	Text = "Notification Side",
+
+	Callback = function(Value)
+		Library:SetNotifySide(Value)
+	end,
+})
+MenuGroup:AddDropdown("DPIDropdown", {
+	Values = { "50%", "75%", "100%", "125%", "150%", "175%", "200%" },
+	Default = "100%",
+
+	Text = "DPI Scale",
+
+	Callback = function(Value)
+		Value = Value:gsub("%%", "")
+		local DPI = tonumber(Value)
+
+		Library:SetDPIScale(DPI)
+	end,
+})
+MenuGroup:AddDivider()
+MenuGroup:AddLabel("Menu bind")
+	:AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
+
+MenuGroup:AddButton("Unload", function()
+	Library:Unload()
+end)
+
+Library.ToggleKeybind = Options.MenuKeybind 
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+
+SaveManager:IgnoreThemeSettings()
+
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+
+ThemeManager:SetFolder("MyScriptHub")
+SaveManager:SetFolder("MyScriptHub/specific-game")
+SaveManager:SetSubFolder("specific-place") 
+
+SaveManager:BuildConfigSection(Tabs["UI Settings"])
+
+ThemeManager:ApplyToTab(Tabs["UI Settings"])
+
+SaveManager:LoadAutoloadConfig()
